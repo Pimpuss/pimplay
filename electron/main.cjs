@@ -9,7 +9,7 @@ const { minimizeWindowsOf, closeWindowsOf, killProcesses } = require('./windows.
 const { wikiLookup } = require('./wiki.cjs');
 const { fetchFreeGames, STORE: EPIC_STORE } = require('./epic-free.cjs');
 const { lifetimeStats } = require('./lifetime.cjs');
-const { setupUpdater, checkForUpdate, installUpdate, updateState } = require('./updater.cjs');
+const { setupUpdater, checkForUpdate, checkIfStale, installUpdate, updateState } = require('./updater.cjs');
 const { login: steamLogin, logout: steamLogout, fetchAccount } = require('./steam-account.cjs');
 const ACCOUNTS = { epic: require('./epic-account.cjs'), gog: require('./gog-account.cjs') };
 const { searchSteam, steamDetails, autoMatch, applyMeta, fetchSteamAssets, withAssets } = require('./meta.cjs');
@@ -942,6 +942,7 @@ function showWindow() {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  checkIfStale();
 }
 
 function quitApp() {

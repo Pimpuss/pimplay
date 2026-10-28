@@ -1,10 +1,13 @@
 // Mises à jour automatiques : les versions sont publiées dans les Releases GitHub de Pimpuss/pimplay
-// (installateur + latest.yml). Pimplay vérifie au démarrage puis toutes les 6 h, télécharge en
-// arrière-plan, et installe au redémarrage (ou à la fermeture si l'utilisateur ne redémarre pas).
+// (installateur + latest.yml). Pimplay vérifie au démarrage, à chaque réouverture de sa fenêtre depuis la
+// zone de notification, puis toutes les 6 h ; il télécharge en arrière-plan et installe au redémarrage
+// (ou à la fermeture si l'utilisateur ne redémarre pas).
 const { app } = require('electron');
 
 const CHECK_EVERY = 6 * 3600 * 1000;
+const RECHECK_AFTER = 10 * 60 * 1000; // délai minimal entre deux vérifications à la réouverture de la fenêtre
 let autoUpdater = null;
+let lastCheck = 0;
 let state = { status: 'idle', version: null, progress: 0, error: null, checkedAt: null };
 
 function friendly(err) {
@@ -39,8 +42,16 @@ function setupUpdater(send) {
 
 function checkForUpdate() {
   // Pas de nouvelle vérification pendant un téléchargement ou quand la mise à jour attend le redémarrage
-  if (autoUpdater && !['checking', 'downloading', 'ready'].includes(state.status)) autoUpdater.checkForUpdates().catch(() => {});
+  if (autoUpdater && !['checking', 'downloading', 'ready'].includes(state.status)) {
+    lastCheck = Date.now();
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
   return state;
+}
+
+// Pimplay reste ouvert dans la zone de notification : on revérifie quand l'utilisateur rouvre la fenêtre
+function checkIfStale() {
+  if (Date.now() - lastCheck > RECHECK_AFTER) checkForUpdate();
 }
 
 // Ferme Pimplay, installe sans fenêtre d'installation, puis relance la nouvelle version
@@ -52,4 +63,4 @@ function installUpdate(beforeQuit) {
 
 const updateState = () => state;
 
-module.exports = { setupUpdater, checkForUpdate, installUpdate, updateState };
+module.exports = { setupUpdater, checkForUpdate, checkIfStale, installUpdate, updateState };
