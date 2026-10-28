@@ -692,22 +692,39 @@ function setupIpc() {
     const launcherUp = !launcherProc || listProcesses().some((p) => p.name.toLowerCase() === launcherProc);
     setLaunch({ gameId: id, kind: type, stage: launcherUp ? 'starting' : 'launcher', startedAt: Date.now() });
 
-    const detach = (exe, args, cwd) => spawn(exe, args, { cwd, detached: true, stdio: 'ignore' }).unref();
-    if (type === 'steam' && launchers.steamExe) {
-      // Démarre Steam s'il est fermé puis lance le jeu ; transmis à l'instance existante sinon
-      // -silent : si Steam était fermé, il démarre dans la zone de notification sans ouvrir sa fenêtre
-      const silent = store.data.settings.silentLaunchers !== false ? ['-silent'] : [];
-      detach(launchers.steamExe, [...silent, '-applaunch', g.launch.appid]);
-    } else if (type === 'epic' && launchers.epicExe) {
-      // Même commande que le lien com.epicgames.launcher:// : démarre le launcher si besoin
-      detach(launchers.epicExe, [g.launch.url]);
-    } else if (type === 'battlenet' && launchers.battlenetExe && g.launch.code) {
-      // Démarre Battle.net si besoin et lance directement le jeu
-      detach(launchers.battlenetExe, [`--exec=launch ${g.launch.code}`]);
-    } else if (g.launch.url) {
-      await shell.openExternal(g.launch.url);
-    } else {
-      detach(g.launch.exe, [], g.launch.cwd);
+    // Attend la création du processus pour que ses erreurs (exe introuvable, droits) remontent à l'interface
+    // au lieu de planter le processus principal
+    const detach = (exe, args, cwd) => new Promise((resolve, reject) => {
+      const child = spawn(exe, args, { cwd, detached: true, stdio: 'ignore' });
+      child.once('spawn', () => { child.unref(); resolve(); });
+      child.once('error', reject);
+    });
+    try {
+      if (type === 'steam' && launchers.steamExe) {
+        // Démarre Steam s'il est fermé puis lance le jeu ; transmis à l'instance existante sinon
+        // -silent : si Steam était fermé, il démarre dans la zone de notification sans ouvrir sa fenêtre
+        const silent = store.data.settings.silentLaunchers !== false ? ['-silent'] : [];
+        await detach(launchers.steamExe, [...silent, '-applaunch', g.launch.appid]);
+      } else if (type === 'epic' && launchers.epicExe) {
+        // Même commande que le lien com.epicgames.launcher:// : démarre le launcher si besoin
+        await detach(launchers.epicExe, [g.launch.url]);
+      } else if (type === 'battlenet' && launchers.battlenetExe && g.launch.code) {
+        // Démarre Battle.net si besoin et lance directement le jeu
+        await detach(launchers.battlenetExe, [`--exec=launch ${g.launch.code}`]);
+      } else if (g.launch.url) {
+        await shell.openExternal(g.launch.url);
+      } else {
+        await detach(g.launch.exe, [], g.launch.cwd).catch(async (err) => {
+          // EACCES : l'exe exige les droits administrateur (manifeste requireAdministrator).
+          // spawn ne sait pas élever ; ShellExecute (openPath) affiche l'invite UAC
+          if (err.code !== 'EACCES') throw err;
+          const failure = await shell.openPath(g.launch.exe);
+          if (failure) throw new Error(failure);
+        });
+      }
+    } catch (err) {
+      setLaunch(null);
+      throw new Error(`Impossible de lancer ${g.name} : ${err.message}`);
     }
     return true;
   });
