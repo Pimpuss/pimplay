@@ -1,0 +1,76 @@
+{
+  "name": "pimplay",
+  "productName": "Pimplay",
+  "version": "0.2.0",
+  "description": "Launcher de jeux (Steam, Epic, GOG) avec trainers pour jeux solo",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pimpuss/pimplay.git"
+  },
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c magenta,cyan \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build": "vite build",
+    "start": "electron .",
+    "test:engine": "node scripts/test-engine.cjs",
+    "icons": "node scripts/make-icons.cjs",
+    "dist": "vite build && electron-builder --win",
+    "release": "vite build && electron-builder --win --publish never && node scripts/release.cjs"
+  },
+  "build": {
+    "appId": "fr.yalma.pimplay",
+    "productName": "Pimplay",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Pimpuss",
+        "repo": "pimplay"
+      }
+    ],
+    "nsis": {
+      "artifactName": "Pimplay-Setup-${version}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "shortcutName": "Pimplay"
+    }
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "electron-updater": "^6.8.11",
+    "iced-x86": "^1.21.0",
+    "koffi": "^3.3.4",
+    "lucide-react": "^1.61.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "cross-env": "^10.1.0",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "png-to-ico": "^3.0.2",
+    "vite": "^8.3.5",
+    "wait-on": "^9.5.1"
+  }
+}
