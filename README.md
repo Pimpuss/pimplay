@@ -29,12 +29,13 @@ toutes les 6 h, téléchargent la nouvelle version en arrière-plan et l'install
 
 - **Bibliothèque** : détection automatique des jeux Steam (toutes les bibliothèques), Epic Games et GOG, ajout manuel d'un `.exe`. Jaquettes depuis le cache local de Steam puis le CDN.
 - **Détection en jeu** : surveille les processus toutes les 2 s et repère les jeux lancés (exécutable situé dans le dossier d'installation).
-- **Trainer** : quand on clique sur *Jouer* ou *Activer les mods*, Pimplay s'attache au jeu dès qu'il tourne. Quatre types de mods :
+- **Trainer** : quand on clique sur *Jouer* ou *Activer les mods*, Pimplay s'attache au jeu dès qu'il tourne. Cinq types de mods :
   - **Gel** : réécrit une valeur toutes les 100 ms (vie, munitions…)
   - **Curseur** : choisit une valeur (argent, vitesse…), éventuellement gelée
   - **Bouton** : définit ou ajoute une valeur à chaque déclenchement
+  - **Multiplicateur** : multiplie la valeur d'origine du jeu (×2, ×5…) et la remet à la désactivation ; si le jeu change lui-même la valeur (autre outil équipé…), elle devient la nouvelle base
   - **Patch** : remplace des octets de code (NOP…), restauré à la désactivation
-- **Cibles** : adresse absolue, `module + offset` avec chaîne de pointeurs, ou signature AOB (`48 8B ?? 05`).
+- **Cibles** : adresse absolue, `module + offset` avec chaîne de pointeurs, signature AOB (`48 8B ?? 05`), ou **objet Unity (IL2CPP)** : classe et champs désignés par leur nom, instances retrouvées dans le tas, donc sans offset codé en dur (64 bits).
 - **Raccourcis globaux** (F1, Ctrl+F2, pavé numérique…) actifs uniquement quand un jeu est connecté.
 - **Scanner mémoire** à la Cheat Engine : premier scan (valeur exacte, 6 types), affinage (exacte, augmentée, diminuée, changée, inchangée), édition de valeur, création de mod en un clic. Les adresses statiques sont affichées en `module+offset`.
 - **« Qui écrit ici ? »** : débogueur à points d'arrêt matériels (jusqu'à 4 adresses à la fois). Affiche les instructions du jeu qui modifient la valeur (désassemblées avec iced-x86) et crée en un clic un patch NOP avec une signature AOB unique, donc un mod qui survit aux relancements. 64 bits uniquement.
@@ -58,6 +59,18 @@ Un fichier par jeu dans `%APPDATA%/pimplay/trainers/` :
 }
 ```
 
+Cible IL2CPP avec un multiplicateur (exemple complet : [`trainers/MoonSweepers.pimplay.json`](trainers/MoonSweepers.pimplay.json), notes dans [`trainers/MoonSweepers.md`](trainers/MoonSweepers.md)) :
+
+```json
+{ "id": "vehicle-width", "name": "Largeur de brosse du véhicule", "kind": "multiplier",
+  "valueType": "float", "value": 5, "min": 1, "max": 10, "step": 0.5,
+  "target": { "il2cpp": { "class": "MoonCleaners.MoonPrototypeVehicle",
+                          "where": { "<IsDriven>k__BackingField": true },
+                          "path": ["authored", "cleaningWidth"] } } }
+```
+
+`class` est `espace de noms.Classe` ; `path` suit les champs depuis l'objet (les références sont déréférencées, le dernier champ est la valeur visée) ; `where` choisit l'objet quand il y en a plusieurs ; `"all": true` applique le mod à tous les objets de la classe (tous les outils, tous les robots…) ; `"[]"` dans le chemin parcourt chaque élément d'une liste ou d'un tableau ; `"static": true` part des champs statiques de la classe ; `"method": "Nom"` (+ `offset`) vise le code d'une méthode, pour un patch. Un patch peut indiquer `expect`, les octets d'origine attendus : s'ils diffèrent (mise à jour du jeu), il n'est pas appliqué. Une propriété C# auto-implémentée `Spec` s'écrit `<Spec>k__BackingField`. La première recherche parcourt la mémoire du jeu en arrière-plan (quelques secondes) ; le mod affiche « Recherche des objets du jeu… » en attendant.
+
 ## Structure
 
 ```
@@ -69,11 +82,13 @@ electron/
   engine/
     win32.cjs       bindings kernel32 (koffi)
     process.cjs     lecture/écriture, modules, régions, AOB, pointeurs
+    il2cpp.cjs      cibles Unity IL2CPP : classe, champs et instances par leur nom
     scanner.cjs     scan de valeurs
     session.cjs     application des mods
     debugger.cjs    « qui écrit ici ? » : décodage, signature AOB, patch
     debugger-worker.cjs  boucle de débogage Win32 (thread dédié)
 src/                interface React (pages Accueil, Mes jeux, Jeu, Scanner, Paramètres)
+trainers/           trainers prêts à importer, avec leurs notes
 scripts/            test du moteur, faux jeu de test, client CDP
 ```
 

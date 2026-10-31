@@ -1,7 +1,7 @@
 // Test bout-en-bout du moteur : lance un faux jeu, scanne, affine, écrit, gèle et teste l'AOB.
 const { spawn } = require('node:child_process');
 const assert = require('node:assert');
-const { GameProcess, listProcesses, toHex } = require('../electron/engine/process.cjs');
+const { GameProcess, listProcesses, toHex, TYPES } = require('../electron/engine/process.cjs');
 const { Scanner } = require('../electron/engine/scanner.cjs');
 const { TrainerSession } = require('../electron/engine/session.cjs');
 
@@ -83,6 +83,55 @@ function startGame() {
   console.log('gel actif ->', state);
   assert.equal(state.hp, 5000);
   session.toggle('hp', false);
+
+  // Multiplicateur : ×2 sur l'endurance, puis valeur d'origine remise à la désactivation
+  // (le scan float trouve aussi des copies de 87.25 : l'endurance est 8 octets après la vie)
+  const stamina = toHex(BigInt(hit.address) + 8n);
+  session.setTrainer({
+    cheats: [...session.trainer.cheats,
+      { id: 'st', name: 'Endurance ×2', kind: 'multiplier', valueType: 'float', value: 2, target: { address: stamina } }],
+  });
+  session.toggle('st', true);
+  state = await game.send('show');
+  console.log('multiplicateur ×2 ->', state);
+  assert.equal(state.stamina, 174.5);
+  session.setValue('st', 4);
+  state = await game.send('show');
+  assert.equal(state.stamina, 349);
+  // Le jeu change lui-même la valeur : elle devient la nouvelle base une fois stable
+  proc.writeValue(BigInt(stamina), 'float', 50);
+  await new Promise((res) => setTimeout(res, 400));
+  state = await game.send('show');
+  console.log('le jeu passe la base à 50 ->', state);
+  assert.equal(state.stamina, 200);
+  session.toggle('st', false);
+  state = await game.send('show');
+  console.log('multiplicateur désactivé ->', state);
+  assert.equal(state.stamina, 50);
+
+  // Patch avec octets attendus : refusé s'ils ne correspondent pas, appliqué puis restauré sinon
+  const current = proc.read(BigInt(stamina), 4).toString('hex').match(/../g).join(' ');
+  session.setTrainer({
+    cheats: [...session.trainer.cheats,
+      { id: 'bad', name: 'Mauvais patch', kind: 'patch', patch: '00 00 80 3F', expect: 'DE AD BE EF', target: { address: stamina } },
+      { id: 'ok', name: 'Bon patch', kind: 'patch', patch: '00 00 80 3F', expect: current, target: { address: stamina } }],
+  });
+  session.toggle('bad', true);
+  assert.equal(session.state.get('bad').enabled, false);
+  assert.match(session.state.get('bad').error, /différent/);
+  session.toggle('ok', true);
+  state = await game.send('show');
+  assert.equal(state.stamina, 1);
+  session.toggle('ok', false);
+  state = await game.send('show');
+  console.log('patch avec octets attendus appliqué puis restauré ->', state);
+  assert.equal(state.stamina, 50);
+
+  // Décimal .NET (argent) : 97 547,40 s'écrit échelle 2, mantisse 9754740
+  const dec = Buffer.alloc(16);
+  TYPES.decimal.write(dec, 0, 97547.4);
+  assert.equal(dec.toString('hex'), '000002000000000074d8940000000000');
+  assert.equal(TYPES.decimal.read(dec, 0), 97547.4);
 
   // Module + offset et AOB : l'en-tête PE « MZ » est en tête du module principal
   const mod = proc.findModule(proc.exeName);

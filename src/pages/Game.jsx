@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Clock, Code2, Download, Eye, EyeOff, FolderOpen, Gamepad2, HardDrive, History, Loader2, MousePointerClick, Pencil, Play, Plus, Power,
-  ScanSearch, Settings2, ShieldAlert, SlidersHorizontal, Snowflake, Square, Star, Timer, Trash2, Upload, Wand2,
+  ScanSearch, Settings2, ShieldAlert, SlidersHorizontal, Snowflake, Square, Star, Timer, Trash2, Upload, Wand2, X,
 } from 'lucide-react';
 import { useApp, SOURCES, formatSize, formatPlaytime, timeAgo } from '../lib/context.jsx';
 import { Cover, GameLogo, HotkeyInput, Modal, Toggle, formatHotkey, heroStyle } from '../components/ui.jsx';
-import CheatEditor, { newCheat, VALUE_TYPES } from '../components/CheatEditor.jsx';
+import CheatEditor, { newCheat, CHEAT_VALUE_TYPES } from '../components/CheatEditor.jsx';
 import MetaModal from '../components/MetaModal.jsx';
 import { useSessions } from './Stats.jsx';
 import { computeStats, formatBucket, formatDuration, formatSessionDate } from '../lib/stats.js';
 
-const KIND_ICON = { freeze: Snowflake, slider: SlidersHorizontal, button: MousePointerClick, patch: Code2 };
-const KIND_LABEL = { freeze: 'Gel', slider: 'Curseur', button: 'Bouton', patch: 'Patch' };
-const TYPE_LABEL = Object.fromEntries(VALUE_TYPES);
+const KIND_ICON = { freeze: Snowflake, slider: SlidersHorizontal, button: MousePointerClick, multiplier: X, patch: Code2 };
+const KIND_LABEL = { freeze: 'Gel', slider: 'Curseur', button: 'Bouton', multiplier: 'Multiplicateur', patch: 'Patch' };
+const TYPE_LABEL = Object.fromEntries(CHEAT_VALUE_TYPES);
 
 function fmt(v) {
   if (v === null || v === undefined) return '—';
@@ -31,7 +31,7 @@ export default function Game({ id }) {
 
   // En-tête qui se replie : la position de défilement pilote la parallaxe de la bannière (variable CSS,
   // sans re-rendu) et l'apparition de la barre compacte une fois la bannière passée.
-  const pageRef = useRef(null);
+  const heroRef = useRef(null);
   const actionsRef = useRef(null);
   const [compact, setCompact] = useState(false);
   useEffect(() => {
@@ -40,8 +40,10 @@ export default function Game({ id }) {
     // Les événements scroll sont déjà alignés sur le rafraîchissement de l'écran ; setCompact ne
     // provoque un rendu que lorsque la valeur change. La barre compacte prend le relais quand les
     // grands boutons (Jouer…) passent sous elle, pour ne jamais les afficher en double.
+    // --sy est posée sur la bannière seule, et figée une fois qu'elle a quitté l'écran : sur toute la
+    // page, cette variable héritée faisait recalculer le style de chaque mod à chaque cran de défilement.
     const onScroll = () => {
-      pageRef.current?.style.setProperty('--sy', String(main.scrollTop));
+      heroRef.current?.style.setProperty('--sy', String(Math.min(main.scrollTop, 800)));
       const actions = actionsRef.current?.getBoundingClientRect();
       setCompact(!!actions && actions.bottom < main.getBoundingClientRect().top + 64);
     };
@@ -128,7 +130,7 @@ export default function Game({ id }) {
   if (!modTools) status = game.running ? <span className="pill ok"><span className="dot" /> En cours</span> : null;
 
   return (
-    <div className="game-page" ref={pageRef}>
+    <div className="game-page">
       {/* Barre fixe : retour toujours visible ; mini-fiche + action principale une fois la bannière passée */}
       <div className={`game-bar ${compact ? 'compact' : ''}`}>
         <button className="btn sm game-back" onClick={() => navigate('library')}><ArrowLeft /> Mes jeux</button>
@@ -153,7 +155,7 @@ export default function Game({ id }) {
       </div>
 
       {/* Bannière au format Steam (~3:1), pleine luminosité, fondu seulement en bas */}
-      <div className="game-hero">
+      <div className="game-hero" ref={heroRef}>
         <Cover game={game} kind="hero" className="game-hero-img" style={heroStyle(game)} />
       </div>
       <div className="game-inner">
@@ -218,7 +220,7 @@ export default function Game({ id }) {
 
         <div className="game-body">
           {!modTools && <AboutPanel game={game} onCustomize={() => setCustomizing(true)} />}
-          {modTools && <section className="panel">
+          {modTools && <section className="panel mods-panel">
             <div className="panel-head">
               <h3><Wand2 /> Mods</h3>
               <span className="pill accent">{trainer?.cheats.length || 0}</span>
@@ -504,6 +506,7 @@ function CheatRow({ cheat: c, state, attached, flash, editMode, onToggle, onValu
         <div className="mod-sub">
           <span>{KIND_LABEL[c.kind]}{c.valueType ? ` · ${TYPE_LABEL[c.valueType]}` : ''}{c.kind === 'freeze' ? ` · ${fmt(c.value)}` : ''}{c.kind === 'button' ? ` · ${c.op === 'add' ? '+' : '='}${fmt(c.value)}` : ''}</span>
           {attached && state?.current !== undefined && state?.current !== null && <span className="cur">actuel : {fmt(state.current)}</span>}
+          {attached && on && state?.base !== undefined && state?.base !== null && <span className="cur">origine : {fmt(state.base)}</span>}
           {state?.error && <span className="err">{state.error}</span>}
         </div>
       </div>
@@ -515,7 +518,7 @@ function CheatRow({ cheat: c, state, attached, flash, editMode, onToggle, onValu
           </div>
         ) : (
           <>
-            {c.kind === 'slider' && (
+            {(c.kind === 'slider' || c.kind === 'multiplier') && (
               <div className="slider">
                 <input
                   type="range" min={c.min} max={c.max} step={c.step} value={val}
@@ -532,7 +535,7 @@ function CheatRow({ cheat: c, state, attached, flash, editMode, onToggle, onValu
               </div>
             )}
             {c.kind === 'button' && <button className="btn sm" onClick={onTrigger} disabled={!attached}>Appliquer</button>}
-            {(c.kind === 'freeze' || c.kind === 'patch' || (c.kind === 'slider' && c.freeze)) && <Toggle on={on} onChange={onToggle} />}
+            {(c.kind === 'freeze' || c.kind === 'patch' || c.kind === 'multiplier' || (c.kind === 'slider' && c.freeze)) && <Toggle on={on} onChange={onToggle} />}
           </>
         )}
         <HotkeyInput value={c.hotkey} onChange={onHotkey} />

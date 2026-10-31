@@ -9,6 +9,21 @@ const TYPES = {
   int64: { size: 8, read: (b, o) => Number(b.readBigInt64LE(o)), write: (b, o, v) => b.writeBigInt64LE(BigInt(Math.trunc(v)), o) },
   float: { size: 4, read: (b, o) => b.readFloatLE(o), write: (b, o, v) => b.writeFloatLE(v, o) },
   double: { size: 8, read: (b, o) => b.readDoubleLE(o), write: (b, o, v) => b.writeDoubleLE(v, o) },
+  // System.Decimal de .NET (argent des jeux Unity) : drapeaux (échelle, signe), 32 bits hauts, 64 bits bas.
+  // Écrit avec 2 décimales.
+  decimal: {
+    size: 16,
+    read: (b, o) => {
+      const flags = b.readUInt32LE(o);
+      const mantissa = Number(b.readBigUInt64LE(o + 8)) + b.readUInt32LE(o + 4) * 2 ** 64;
+      return (flags >>> 31 ? -1 : 1) * mantissa / 10 ** ((flags >> 16) & 0xff);
+    },
+    write: (b, o, v) => {
+      b.writeUInt32LE(((2 << 16) | (v < 0 ? 0x80000000 : 0)) >>> 0, o);
+      b.writeUInt32LE(0, o + 4);
+      b.writeBigUInt64LE(BigInt(Math.round(Math.abs(v) * 100)), o + 8);
+    },
+  },
 };
 
 function parseHex(value) {
@@ -235,9 +250,33 @@ class GameProcess {
     return found;
   }
 
-  // Résout une cible de mod : adresse absolue, module+offset (+ chaîne de pointeurs) ou signature AOB.
+  // Résolveur IL2CPP (jeux Unity), créé à la première cible qui en a besoin
+  il2cpp() {
+    if (!this._il2cpp) {
+      const { Il2Cpp } = require('./il2cpp.cjs');
+      this._il2cpp = new Il2Cpp(this);
+    }
+    return this._il2cpp;
+  }
+
+  // Toutes les adresses visées : une par objet pour une cible IL2CPP « all », sinon une seule
+  resolveAll(target) {
+    if (target?.il2cpp?.all) return this.il2cpp().resolveAll(target.il2cpp);
+    const addr = this.resolve(target);
+    return addr === null ? [] : [addr];
+  }
+
+  // Pour l'affichage seulement : ne relance pas de recherche coûteuse (cible IL2CPP)
+  peek(target) {
+    if (target?.il2cpp) return this.il2cpp().resolve(target.il2cpp, true) ?? null;
+    return this.resolve(target);
+  }
+
+  // Résout une cible de mod : adresse absolue, module+offset (+ chaîne de pointeurs), signature AOB
+  // ou champ d'un objet IL2CPP (le premier objet qui convient).
   resolve(target) {
     if (!target) return null;
+    if (target.il2cpp) return this.il2cpp().resolve(target.il2cpp);
     let addr;
     if (target.aob) {
       addr = this.aobScan(target.aob, target.module);

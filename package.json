@@ -1,7 +1,7 @@
 {
   "name": "pimplay",
   "productName": "Pimplay",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Launcher de jeux (Steam, Epic, GOG) avec trainers pour jeux solo",
   "private": true,
   "repository": {
