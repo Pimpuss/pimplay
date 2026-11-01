@@ -504,7 +504,8 @@ function CheatRow({ cheat: c, state, attached, flash, editMode, onToggle, onValu
       <div className="mod-info">
         <div className="mod-name">{c.name}</div>
         <div className="mod-sub">
-          <span>{KIND_LABEL[c.kind]}{c.valueType ? ` · ${TYPE_LABEL[c.valueType]}` : ''}{c.kind === 'freeze' ? ` · ${fmt(c.value)}` : ''}{c.kind === 'button' ? ` · ${c.op === 'add' ? '+' : '='}${fmt(c.value)}` : ''}</span>
+          <span>{KIND_LABEL[c.kind]}{c.until ? ' · usage unique' : ''}{c.valueType ? ` · ${TYPE_LABEL[c.valueType]}` : ''}{c.kind === 'freeze' ? ` · ${fmt(c.value)}` : ''}{c.kind === 'button' ? ` · ${c.op === 'add' ? '+' : '='}${fmt(c.value)}` : ''}</span>
+          {c.until && on && <span className="cur">{c.untilHint || 'en attente de l\'action dans le jeu…'}</span>}
           {attached && state?.current !== undefined && state?.current !== null && <span className="cur">actuel : {fmt(state.current)}</span>}
           {attached && on && state?.base !== undefined && state?.base !== null && <span className="cur">origine : {fmt(state.base)}</span>}
           {state?.error && <span className="err">{state.error}</span>}
@@ -535,7 +536,10 @@ function CheatRow({ cheat: c, state, attached, flash, editMode, onToggle, onValu
               </div>
             )}
             {c.kind === 'button' && <button className="btn sm" onClick={onTrigger} disabled={!attached}>Appliquer</button>}
-            {(c.kind === 'freeze' || c.kind === 'patch' || c.kind === 'multiplier' || (c.kind === 'slider' && c.freeze)) && <Toggle on={on} onChange={onToggle} />}
+            {c.kind === 'patch' && c.until && (
+              <button className={`btn sm ${on ? 'primary' : ''}`} onClick={onTrigger} disabled={!attached}>{on ? 'Annuler' : 'Appliquer'}</button>
+            )}
+            {(c.kind === 'freeze' || (c.kind === 'patch' && !c.until) || c.kind === 'multiplier' || (c.kind === 'slider' && c.freeze)) && <Toggle on={on} onChange={onToggle} />}
           </>
         )}
         <HotkeyInput value={c.hotkey} onChange={onHotkey} />

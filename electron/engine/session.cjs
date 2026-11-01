@@ -10,6 +10,13 @@ function parseBytes(str) {
   return Buffer.from(String(str).trim().split(/\s+/).map((b) => parseInt(b, 16)));
 }
 
+// Octets attendus avec jokers : « E8 ?? ?? ?? ?? 44 0F » (-1 = n'importe quel octet)
+function parseMask(str) {
+  return String(str).trim().split(/\s+/).map((b) => (/^\?{1,2}$/.test(b) ? -1 : parseInt(b, 16)));
+}
+
+const matchesMask = (buf, mask) => mask.every((b, i) => b === -1 || buf[i] === b);
+
 class TrainerSession extends EventEmitter {
   constructor() {
     super();
@@ -17,7 +24,7 @@ class TrainerSession extends EventEmitter {
     this.gameId = null;
     this.trainer = { cheats: [] };
     this.state = new Map(); // id -> { enabled, value, error, current }
-    this.patches = new Map(); // id -> { addr, original }
+    this.patches = new Map(); // id -> [{ addr, original }] (un par emplacement)
     this.multiplied = new Map(); // id -> { addr, base, written }
     this.error = null;
     this.freezeTimer = null;
@@ -127,6 +134,8 @@ class TrainerSession extends EventEmitter {
       if (s.enabled) this.applyPatch(c, s);
       else this.restorePatch(id);
     }
+    // Patch à usage unique : on note la valeur surveillée au moment où il est armé
+    if (c.kind === 'patch' && c.until) s.untilStart = s.enabled && this.proc ? this.readUntil(c) : undefined;
     if (this.proc && c.kind === 'multiplier') {
       if (s.enabled) this.applyMultiplier(c, s);
       else this.restoreMultiplier(id);
@@ -149,6 +158,8 @@ class TrainerSession extends EventEmitter {
     const c = this.cheat(id);
     const s = this.state.get(id);
     if (!c || !s || !this.proc) return;
+    // Patch à usage unique : le bouton l'arme, ou l'annule s'il attend encore
+    if (c.kind === 'patch') return this.toggle(id);
     for (const addr of this.resolveMany(c, s)) {
       if (c.op === 'add') {
         const cur = this.proc.readValue(addr, c.valueType);
@@ -177,36 +188,77 @@ class TrainerSession extends EventEmitter {
     }
   }
 
+  // Emplacements d'un patch : « sites » quand il faut modifier plusieurs endroits du code ensemble
+  patchSites(c) {
+    return c.sites || [{ target: c.target, patch: c.patch, expect: c.expect }];
+  }
+
+  // Tout ou rien : si un emplacement échoue, ceux déjà modifiés sont remis en état
   applyPatch(c, s) {
-    const addr = this.resolve(c, s);
-    // Cible IL2CPP encore en recherche : le mod reste activé, freezeTick réessaiera
-    if (addr === null) { if (!/^Recherche|pas encore/.test(s.error || '')) s.enabled = false; return; }
-    const bytes = parseBytes(c.patch);
-    const expect = c.expect ? parseBytes(c.expect) : null;
-    const kept = this.patches.get(c.id)?.original;
-    const current = kept ? null : this.proc.read(addr, Math.max(bytes.length, expect?.length || 0));
-    const original = kept || current?.subarray(0, bytes.length);
-    if (!original) { s.error = 'Lecture impossible'; s.enabled = false; return; }
-    // Octets attendus avant le patch : si le code a changé (mise à jour du jeu), on ne touche à rien
-    if (expect && current && !current.subarray(0, expect.length).equals(expect)) {
-      s.error = 'Code du jeu différent de celui attendu (mise à jour ?) : patch non appliqué';
-      s.enabled = false;
-      return;
+    if (this.patches.has(c.id)) return;
+    const applied = [];
+    const abort = (error, keepEnabled = false) => {
+      for (const p of applied.reverse()) this.proc.writeProtected(p.addr, p.original);
+      if (error) s.error = error;
+      if (!keepEnabled) s.enabled = false;
+    };
+    for (const site of this.patchSites(c)) {
+      let addr;
+      try {
+        addr = this.proc.resolve(site.target);
+      } catch (e) {
+        // Cible IL2CPP encore en recherche : le mod reste activé, freezeTick réessaiera
+        return abort(e.message, /^Recherche|pas encore/.test(e.message));
+      }
+      if (addr === null) return abort('Adresse introuvable');
+      const bytes = parseBytes(site.patch);
+      const expect = site.expect ? parseMask(site.expect) : null;
+      const current = this.proc.read(addr, Math.max(bytes.length, expect?.length || 0));
+      if (!current) return abort('Lecture impossible');
+      // Octets attendus avant le patch : si le code a changé (mise à jour du jeu), on ne touche à rien
+      if (expect && !matchesMask(current, expect)) return abort('Code du jeu différent de celui attendu (mise à jour ?) : patch non appliqué');
+      const original = Buffer.from(current.subarray(0, bytes.length));
+      if (!this.proc.writeProtected(addr, bytes)) return abort('Patch impossible');
+      applied.push({ addr, original });
     }
-    if (!this.proc.writeProtected(addr, bytes)) { s.error = 'Patch impossible'; s.enabled = false; return; }
-    this.patches.set(c.id, { addr, original });
+    s.error = null;
+    this.patches.set(c.id, applied);
   }
 
   restorePatch(id) {
-    const p = this.patches.get(id);
-    if (p && this.proc) this.proc.writeProtected(p.addr, p.original);
+    const list = this.patches.get(id);
+    if (list && this.proc) for (const p of [...list].reverse()) this.proc.writeProtected(p.addr, p.original);
     this.patches.delete(id);
+  }
+
+  // Valeur surveillée par un patch à usage unique (« until ») ; undefined tant qu'elle est introuvable
+  readUntil(c) {
+    try {
+      const addr = this.proc.resolve(c.until.target);
+      const v = addr === null ? null : this.proc.readValue(addr, c.until.valueType || 'int32');
+      return v === null ? undefined : v;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Le jeu a exécuté l'action visée (la valeur surveillée a changé) : le patch se retire tout seul
+  checkUntil(c, s) {
+    const v = this.readUntil(c);
+    if (v === undefined) return false;
+    if (s.untilStart === undefined) { s.untilStart = v; return false; }
+    // ignoreZero : le jeu remet la valeur à 0 sans faire l'action (passage à vide), on attend une vraie valeur
+    if (v === s.untilStart || (c.until.ignoreZero && v === 0)) return false;
+    this.restorePatch(c.id);
+    s.enabled = false;
+    s.untilStart = undefined;
+    return true;
   }
 
   // Multiplie la valeur d'origine du jeu et la réécrit tant que le mod est actif. La cible peut changer
   // (autre véhicule) : l'ancienne retrouve alors sa valeur. Si le jeu change lui-même la valeur (autre
-  // outil équipé…), elle devient la nouvelle base, mais seulement si elle reste stable sur deux passages :
-  // une écriture éclair d'un autre outil (Wand…) serait sinon remultipliée sans fin.
+  // outil équipé…), elle devient la nouvelle base, à condition de rester stable sur deux passages et de
+  // revenir vers l'origine : une écriture d'un autre outil (Wand…) serait sinon remultipliée sans fin.
   // Une cible « all » a plusieurs adresses (une par objet) : chacune garde sa propre base.
   applyMultiplier(c, s) {
     const addrs = this.resolveMany(c, s);
@@ -225,7 +277,11 @@ class TrainerSession extends EventEmitter {
       let base = m ? m.base : cur;
       if (m && cur !== m.written) {
         if (m.changed !== cur) { m.changed = cur; s.base ??= m.base; continue; }
-        base = cur;
+        // Seule une valeur qui revient vers l'origine (plus petite pour ×2, plus grande pour ×0.5) peut
+        // être la nouvelle base du jeu. Une valeur poussée plus loin vient d'un autre outil qui multiplie
+        // aussi (Wand…) : la reprendre ferait grossir la base sans fin. On réécrit alors la nôtre.
+        const towardBase = factor >= 1 ? Math.abs(cur) < Math.abs(m.written) : Math.abs(cur) > Math.abs(m.written);
+        if (towardBase) base = cur;
       }
       const value = c.valueType === 'float' || c.valueType === 'double' ? base * factor : Math.trunc(base * factor);
       if (value !== cur && !this.proc.writeValue(addr, c.valueType, value)) { s.error = 'Écriture impossible'; continue; }
@@ -250,12 +306,18 @@ class TrainerSession extends EventEmitter {
   freezeTick() {
     if (!this.proc) return;
     if (!this.proc.isAlive()) return this.detach('Le jeu a été fermé.');
+    let changed = false;
     for (const c of this.trainer.cheats) {
       const s = this.state.get(c.id);
       if (s?.enabled && (c.kind === 'freeze' || (c.kind === 'slider' && c.freeze))) this.writeCheat(c, s);
       if (s?.enabled && c.kind === 'multiplier') this.applyMultiplier(c, s);
-      if (s?.enabled && c.kind === 'patch' && !this.patches.has(c.id)) this.applyPatch(c, s);
+      if (s?.enabled && c.kind === 'patch' && !this.patches.has(c.id)) {
+        this.applyPatch(c, s);
+        if (c.until) s.untilStart = this.patches.has(c.id) ? this.readUntil(c) : undefined;
+      }
+      if (s?.enabled && c.kind === 'patch' && c.until && this.patches.has(c.id) && this.checkUntil(c, s)) changed = true;
     }
+    if (changed) this.emitState();
   }
 
   readTick() {

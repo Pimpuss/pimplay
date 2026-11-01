@@ -134,6 +134,34 @@
       }
     },
     {
+      "id": "fill-container",
+      "name": "Remplir le conteneur à poussière",
+      "category": "Joueur",
+      "kind": "patch",
+      "patch": "66 0F 2F C1 73 03 90 90 90",
+      "expect": "66 0F 2F C1 73 03 0F 28 FE",
+      "hotkey": "",
+      "target": {
+        "il2cpp": {
+          "class": "MoonCleaners.MoonWorld",
+          "method": "FinishInventorySweep",
+          "offset": "0xea"
+        }
+      },
+      "until": {
+        "target": {
+          "il2cpp": {
+            "class": "MoonCleaners.MoonDustGaugeAnimator",
+            "path": [
+              "targetKg"
+            ]
+          }
+        },
+        "valueType": "float"
+      },
+      "untilHint": "donnez un coup de balai pour remplir…"
+    },
+    {
       "id": "brush-width",
       "name": "Largeur de la brosse",
       "category": "Brosse",
@@ -219,6 +247,22 @@
           "path": [
             "<SpeedFactor>k__BackingField"
           ]
+        }
+      }
+    },
+    {
+      "id": "fill-vehicle",
+      "name": "Remplir le réservoir du véhicule",
+      "category": "Véhicule",
+      "kind": "patch",
+      "patch": "66 0F 2F C1 73 03 90 90 90",
+      "expect": "66 0F 2F C1 73 03 0F 28 FE",
+      "hotkey": "",
+      "target": {
+        "il2cpp": {
+          "class": "MoonCleaners.MoonWorld",
+          "method": "FinishInventorySweep",
+          "offset": "0x162"
         }
       }
     },
@@ -361,7 +405,7 @@
       "category": "Monde",
       "kind": "patch",
       "patch": "B8 00 00 00 3F 66 0F 6E C0 C3",
-      "expect": "40 53 48 83 EC 20 80 3D 9B 19",
+      "expect": "40 53 48 83 EC 20",
       "hotkey": "",
       "target": {
         "il2cpp": {
@@ -369,6 +413,45 @@
           "method": "get_LunarTime"
         }
       }
+    },
+    {
+      "id": "dev-menu",
+      "name": "Menu développeur du jeu",
+      "category": "Monde",
+      "kind": "patch",
+      "target": {
+        "il2cpp": {
+          "class": "MoonCleaners.MoonPauseMenu",
+          "method": "Build",
+          "offset": "0xb2b"
+        }
+      },
+      "patch": "B0 01 90 90 90",
+      "expect": "E8 ?? ?? ?? ?? 44 0F B6 E0",
+      "sites": [
+        {
+          "target": {
+            "il2cpp": {
+              "class": "MoonCleaners.MoonPauseMenu",
+              "method": "Build",
+              "offset": "0xb2b"
+            }
+          },
+          "patch": "B0 01 90 90 90",
+          "expect": "E8 ?? ?? ?? ?? 44 0F B6 E0"
+        },
+        {
+          "target": {
+            "il2cpp": {
+              "class": "MoonCleaners.MoonDevTools",
+              "method": "get_Enabled"
+            }
+          },
+          "patch": "B0 01 C3",
+          "expect": "48 83 EC 28 80 3D"
+        }
+      ],
+      "hotkey": ""
     },
     {
       "id": "money-gain",

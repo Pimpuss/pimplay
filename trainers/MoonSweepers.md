@@ -1,7 +1,9 @@
 # Moon Sweepers — notes de trainer
 
-Relevé sur Moon Sweepers 1.0.4 (build f87fd7e5, Unity 6000.6, IL2CPP), le 31/10/2026. Les offsets ci-dessous
-changent avec les mises à jour ; le trainer vise les champs par leur nom (cible IL2CPP).
+Relevé sur Moon Sweepers 1.0.4 (build f87fd7e5, Unity 6000.6, IL2CPP), le 31/10/2026, puis vérifié sur la
+1.0.5 Steam (build 0121bf5e) le 01/11/2026 : toutes les fonctions y ont changé d'adresse, mais le trainer les
+retrouve par leur nom et les octets attendus des patchs correspondent. Les offsets ci-dessous sont ceux de
+la 1.0.4 et changent avec les mises à jour ; le trainer vise les champs par leur nom (cible IL2CPP).
 
 ## Mods et d'où ils viennent
 
@@ -22,12 +24,15 @@ Chaque champ a été choisi en lisant le code du jeu qui l'utilise (désassembla
 | Capacité des robots | `MoonRobotVacuum.capacityKilograms` (double), tous les robots | `Update`, `Full`, `get_BinFraction` |
 | Capacité de transport | `MoonUpgradeCatalog.containers[].capacityMultiplier` (×2, ×4, ×8 selon le niveau) | `MoonWorld.ContainerMultiplier` → `ContainerCapacityKg` ; sans conteneur acheté, pas d'effet |
 | Dépôts instantanés | patch de `MoonWorld.DepositTimeMultiplier` → renvoie 0 | `MoonDustHand.DepositSeconds = max(0.15, durée × DepositTimeMultiplier())` |
+| Remplir le conteneur à poussière | patch `MoonWorld.FinishInventorySweep` +0xea : NOP sur `movaps xmm7,xmm6` | voir plus bas : chaque coup de balai remplit le conteneur à sa capacité |
+| Remplir le réservoir du véhicule | même fonction, +0x162 (branche `cleaningVehicleStorage`) | idem quand on nettoie avec un véhicule |
 | Chambre de pression rapide | `MoonWorld.ChamberSpec.cycleSeconds` (statique, 12 s) | `MoonWorld.StepProduction` : `Progress += dt × Power / cycleSeconds` |
 | Presse rapide | `MoonWorld.PressSpec.cycleSeconds` (statique, 6 s) | idem |
 | Arbre d'améliorations gratuit | patch `TryGetTreePrice` +0x173 : `movups [rbp],xmm0` → NOP | le prix de sortie reste à 0 (mis à zéro en entrée) |
 | Améliorations de véhicule gratuites | patch `TryGetVehicleUpgradePrice` +0xe4, même principe | |
 | Outils et conteneurs gratuits | patch `MoonWorld.Discounted` → renvoie le décimal 0 | appelé par `TryGetToolPrice`, `TryGetContainerPrice`, `TryPurchaseTool` |
 | Figer l'heure (plein jour) | patch `MoonSolarSystem.get_LunarTime` → renvoie 0.5 | fraction de la journée lunaire (3600 s) utilisée par le ciel, le soleil et `LunarCycle` |
+| Menu développeur du jeu | 2 emplacements : `MoonPauseMenu.Build` +0xb2b (`call Debug.isDebugBuild` → `mov al,1`) et `MoonDevTools.get_Enabled` → `mov al,1 ; ret` | voir plus bas |
 | Gains par kilo de poussière | `MoonSettings.dollarsPerKilogram` (1) | `MoonWorld.CreditShare` et le crédit des lancements |
 | Ajouter de l'argent | `MoonWorld.wallets.Balance` (`TeamWallet`, `System.Decimal`) | `MoonWorld.WalletDollars` |
 
@@ -37,9 +42,37 @@ jour qui change le code, ils refusent de s'appliquer au lieu de corrompre le jeu
 Le véhicule ne ramasse plus la poussière s'il roule trop vite (vitesse du véhicule ×2 et plus) : `Clean`
 ignore les déplacements plus grands que `Spec.speed × SpeedFactor × BoostFactor × 0.3` par passage.
 
+### Remplissage du conteneur
+
+La poussière portée est dans `MoonWorld.inventoryMass` (`Dictionary<string, double>`, clé =
+`MoonDustInventory.playerId`, ex. `steam-7656…`) ; la capacité n'est stockée nulle part, elle est recalculée
+(`InventoryCapacityKg`). À la fin de chaque balayage, `FinishInventorySweep` fait :
+
+```
+nouveau = porté + balayé
+si capacité − nouveau ≤ 0.001 : nouveau = capacité      ; comisd / jae
+sinon                          : (garde nouveau)       ; movaps xmm7,xmm6  ← neutralisé par le mod
+inventoryMass[cleaningPlayer] = nouveau
+```
+
+Avec le mod, la valeur écrite est toujours la capacité calculée par le jeu : un coup de balai remplit le
+conteneur, sans connaître la capacité ni le joueur local.
+
+« Remplir le conteneur » est un patch à usage unique (`until`) : le bouton l'arme, il se retire dès que la
+jauge du HUD (`MoonDustGaugeAnimator.targetKg`) change, c'est-à-dire au remplissage. `LastCollectedKilograms`
+ne convient pas : il reste à 0 lors du balayage qui remplit, puis le conteneur plein bloque les suivants
+(relevé en jeu). « Remplir le réservoir du véhicule » reste un interrupteur.
+
+### Menu développeur
+
+Le jeu embarque un menu développeur dans le menu pause (`MoonPauseMenu.BuildDev`), affiché seulement si
+`Debug.isDebugBuild`. Il contient : remplir / vider la poussière portée (`DevSetCarriedDust(joueur,
+double.MaxValue)`, ramené à la capacité : remplissage instantané, comme Wand), trois boutons d'argent
+(`AddMoney`), l'heure de la journée (`SetLunarTime`) et d'autres réglages. Les actions `Dev*` vérifient en
+plus `MoonDevTools.get_Enabled`. Le mod patche les deux. Effet de bord : `MoonWalker.Update` active aussi les
+touches de debug du jeu (indicateur de noclip, clavier) tant que le mod est actif.
+
 Écartés :
-- Remplir le conteneur à poussière : la poussière portée est dans un dictionnaire par joueur
-  (`MoonWorld+0x658`, `InventoryKilograms`) ; en coop on ne sait pas quelle entrée est la sienne.
 - Achat de véhicules gratuit : prix calculé ailleurs (`TryBuyVehicle`), non relevé.
 - Figer l'heure en gardant l'heure actuelle : l'horloge vaut `secondes × clockSpeed + clockOffset` (statiques
   de `MoonSolarSystem`, ou `crewValue`/`crewSpeed` en coop) ; mettre la vitesse à 0 fait sauter l'heure.

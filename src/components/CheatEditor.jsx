@@ -116,6 +116,8 @@ export default function CheatEditor({ cheat, categories = [], onSave, onClose })
     const out = { id: c.id, name: c.name.trim(), category: c.category.trim() || 'Général', kind: c.kind, hotkey: c.hotkey, target };
     if (c.kind === 'patch') out.patch = c.patch.trim().toUpperCase();
     if (c.kind === 'patch' && c.expect?.trim()) out.expect = c.expect.trim().toUpperCase();
+    if (c.kind === 'patch' && c.sites) out.sites = c.sites;
+    if (c.kind === 'patch' && c.until && c.once !== false) Object.assign(out, { until: c.until, ...(c.untilHint ? { untilHint: c.untilHint } : {}) });
     else {
       out.valueType = c.valueType;
       out.value = Number(c.value);
@@ -206,7 +208,14 @@ export default function CheatEditor({ cheat, categories = [], onSave, onClose })
           <input className="input mono" value={c.patch} onChange={(e) => set({ patch: e.target.value })} placeholder="90 90 90 90 90 90" />
           <label>Octets attendus avant le patch (optionnel)</label>
           <input className="input mono" value={c.expect || ''} onChange={(e) => set({ expect: e.target.value })} placeholder="0F 11 45 00" />
-          <span className="hint">Si le code du jeu ne commence pas par ces octets (mise à jour), le patch n'est pas appliqué.</span>
+          <span className="hint">Si le code du jeu ne commence pas par ces octets (mise à jour), le patch n'est pas appliqué. « ?? » accepte n'importe quel octet.</span>
+          {c.sites && <span className="hint">Ce patch modifie {c.sites.length} emplacements (« sites » dans le JSON du trainer) : seuls ceux-ci sont appliqués, la cible ci-dessous est ignorée.</span>}
+          {c.until && (
+            <label className="check">
+              <input type="checkbox" checked={c.once !== false} onChange={(e) => set({ once: e.target.checked })} />
+              Usage unique : un bouton l'applique, il se retire dès que la valeur surveillée change
+            </label>
+          )}
         </div>
       )}
 

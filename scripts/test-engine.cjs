@@ -104,6 +104,12 @@ function startGame() {
   state = await game.send('show');
   console.log('le jeu passe la base à 50 ->', state);
   assert.equal(state.stamina, 200);
+  // Un autre outil multiplie aussi la valeur (×5) : elle ne devient pas la base, Pimplay remet 50 × 4
+  proc.writeValue(BigInt(stamina), 'float', 1000);
+  await new Promise((res) => setTimeout(res, 400));
+  state = await game.send('show');
+  console.log('un autre outil écrit 1000 ->', state);
+  assert.equal(state.stamina, 200);
   session.toggle('st', false);
   state = await game.send('show');
   console.log('multiplicateur désactivé ->', state);
@@ -126,6 +132,73 @@ function startGame() {
   state = await game.send('show');
   console.log('patch avec octets attendus appliqué puis restauré ->', state);
   assert.equal(state.stamina, 50);
+
+  // Patch à usage unique : armé par le bouton, retiré tout seul quand la valeur surveillée (la vie) change
+  session.setTrainer({
+    cheats: [...session.trainer.cheats,
+      { id: 'once', name: 'Une fois', kind: 'patch', patch: '00 00 80 3F', expect: current,
+        until: { target: { address: hit.address }, valueType: 'int32' }, target: { address: stamina } }],
+  });
+  session.trigger('once');
+  await new Promise((res) => setTimeout(res, 250));
+  state = await game.send('show');
+  assert.equal(state.stamina, 1);
+  assert.equal(session.state.get('once').enabled, true);
+  await game.send('hit');
+  await new Promise((res) => setTimeout(res, 250));
+  state = await game.send('show');
+  console.log('patch à usage unique retiré après l\'action ->', state);
+  assert.equal(state.stamina, 50);
+  assert.equal(session.state.get('once').enabled, false);
+  // ignoreZero : un passage à 0 (action à vide) ne retire pas le patch, la valeur suivante si
+  session.trainer.cheats.find((x) => x.id === 'once').until.ignoreZero = true;
+  session.trigger('once');
+  await new Promise((res) => setTimeout(res, 250));
+  proc.writeValue(BigInt(hit.address), 'int32', 0);
+  await new Promise((res) => setTimeout(res, 250));
+  assert.equal(session.state.get('once').enabled, true);
+  await game.send('hit');
+  await new Promise((res) => setTimeout(res, 250));
+  assert.equal(session.state.get('once').enabled, false);
+  console.log('ignoreZero : passage à 0 ignoré, retiré à la valeur suivante');
+
+  // Patch sur plusieurs emplacements, jokers « ?? » dans les octets attendus, tout ou rien
+  const hpBytes = proc.read(BigInt(hit.address), 4).toString('hex').match(/../g).join(' ');
+  const site = (address, patch, expect) => ({ target: { address }, patch, expect });
+  session.setTrainer({
+    cheats: [...session.trainer.cheats,
+      { id: 'multi-bad', name: 'Multi KO', kind: 'patch', target: { address: stamina }, patch: '00 00 80 3F',
+        sites: [site(stamina, '00 00 80 3F', '?? ?? ?? ??'), site(hit.address, '01 00 00 00', 'DE AD ?? ??')] },
+      { id: 'multi', name: 'Multi', kind: 'patch', target: { address: stamina }, patch: '00 00 80 3F',
+        sites: [site(stamina, '00 00 80 3F', `?? ?? ${current.slice(6)}`), site(hit.address, '01 00 00 00', hpBytes)] }],
+  });
+  session.toggle('multi-bad', true);
+  state = await game.send('show');
+  assert.equal(session.state.get('multi-bad').enabled, false);
+  assert.equal(state.stamina, 50); // le premier emplacement a été remis en état
+  session.toggle('multi', true);
+  state = await game.send('show');
+  assert.deepEqual([state.stamina, state.hp], [1, 1]);
+  session.toggle('multi', false);
+  state = await game.send('show');
+  console.log('patch sur 2 emplacements appliqué puis restauré ->', state);
+  assert.equal(state.stamina, 50);
+
+  // « Désactiver les mods » (setTarget(null)) remet le jeu en état : multiplicateur et patch actifs
+  session.setTrainer({
+    cheats: [...session.trainer.cheats,
+      { id: 'hp-patch', name: 'Patch vie', kind: 'patch', patch: '01 00 00 00', target: { address: hit.address } }],
+  });
+  session.toggle('st', true);
+  session.toggle('hp-patch', true);
+  state = await game.send('show');
+  assert.deepEqual([state.stamina, state.hp], [200, 1]);
+  session.setTarget(null, { cheats: [] });
+  state = await game.send('show');
+  console.log('désactivation des mods ->', state);
+  assert.deepEqual([state.stamina, state.hp], [50, -10]);
+  session.setTarget('test', { cheats: [] });
+  session.attach(pid);
 
   // Décimal .NET (argent) : 97 547,40 s'écrit échelle 2, mantisse 9754740
   const dec = Buffer.alloc(16);
