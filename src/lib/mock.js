@@ -73,13 +73,17 @@ export function installMock() {
       refresh: () => ok(library),
       addCustom: () => ok(null),
       removeCustom: () => ok(library),
+      setArgs: (id, args) => { const g = library.find((x) => x.id === id); if (g) g.launchArgs = args; return ok(library); },
       favorite: (id, on) => { library.find((g) => g.id === id).favorite = on; return ok(library); },
       hide: (id, on) => { library.find((g) => g.id === id).hidden = on; return ok(library); },
       owned: () => ok([]),
       install: () => ok(),
     },
     meta: {
-      search: (term) => ok([
+      search: (term, source = 'steam') => ok(source !== 'steam' ? [
+        { id: '1173281', name: 'Mario Kart 8 Deluxe', detail: 'Nintendo Switch · 2017', image: 'https://www.nintendo.com/eu/media/images/11_square_images/games_18/nintendo_switch_5/SQ_NSwitch_MarioKart8Deluxe_image500w.jpg' },
+        { id: '765384', name: `${term} — autre résultat`, detail: 'Wii U · 2014', image: null },
+      ] : [
         { id: '990080', name: 'Hogwarts Legacy', image: 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/990080/capsule_231x87.jpg' },
         { id: '1245620', name: `${term} — autre résultat`, image: 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1245620/capsule_231x87.jpg' },
       ]),
@@ -90,7 +94,7 @@ export function installMock() {
           name: 'Hogwarts Legacy',
           images: { cover: [`${cdn}/library_600x900_2x.jpg`], hero: [`${cdn}/library_hero.jpg`], logo: [`${cdn}/logo.png`], header: [`${cdn}/header.jpg`] },
           info: { steamAppId: appid, description: 'Hogwarts Legacy est un RPG d’action immersif en monde ouvert.', developers: ['Avalanche Software'], releaseDate: '10 févr. 2023', genres: ['Action', 'Aventure', 'RPG'] },
-          meta: { steamAppId: appid, steamName: 'Hogwarts Legacy', customName: null, customCover: false },
+          meta: { steamAppId: appid, steamName: 'Hogwarts Legacy', source: 'steam', linkId: appid, linkName: 'Hogwarts Legacy', customName: null, customCover: false },
         });
         return ok(library);
       },

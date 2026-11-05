@@ -178,15 +178,25 @@ async function gogGames() {
   return games;
 }
 
-function customGame(exe) {
-  const id = 'custom:' + Buffer.from(exe.toLowerCase()).toString('base64url').slice(-24);
+// Identifiant d'un jeu perso : dérivé du chemin de l'exe et, s'il y en a, de ses arguments
+// (un émulateur peut ainsi lancer plusieurs jeux, un par raccourci)
+function customId(exe, args = '') {
+  return 'custom:' + Buffer.from(exe.toLowerCase() + (args ? `\0${args}` : '')).toString('base64url').slice(-24);
+}
+
+// Entrée de store.data.customGames : chemin d'un .exe (format d'origine) ou
+// { id, exe, args, cwd, name } (raccourci .lnk, ou exe auquel on a ajouté des arguments)
+function customGame(entry) {
+  const e = typeof entry === 'string' ? { exe: entry } : entry;
+  const args = e.args || '';
   return {
-    id,
+    id: e.id || customId(e.exe, args),
     source: 'custom',
-    name: path.basename(exe, path.extname(exe)),
-    installDir: path.dirname(exe),
-    exe,
-    launch: { type: 'exe', exe, cwd: path.dirname(exe) },
+    name: e.name || path.basename(e.exe, path.extname(e.exe)),
+    installDir: path.dirname(e.exe),
+    exe: e.exe,
+    launchArgs: args,
+    launch: { type: 'exe', exe: e.exe, args, cwd: e.cwd || path.dirname(e.exe) },
     images: {},
   };
 }
@@ -206,12 +216,12 @@ function hasAntiCheat(installDir, maxDepth = 4, budget = { dirs: 3000 }) {
   return false;
 }
 
-async function scanLibrary(customExes = []) {
+async function scanLibrary(customEntries = []) {
   const uninstall = await uninstallEntries();
   const [steam, gog, ubisoft] = await Promise.all([steamGames(), gogGames(), ubisoftGames(uninstall)]);
   const all = [
     ...steam, ...epicGames(), ...gog, ...ubisoft, ...battlenetGames(uninstall), ...eaGames(uninstall),
-    ...customExes.map(customGame),
+    ...customEntries.map(customGame),
   ];
   const seen = new Set();
   return all
@@ -321,4 +331,4 @@ function ownedGalaxyGames() {
 
 const normalizeTitle = (s = '') => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-module.exports = { scanLibrary, customGame, hasAntiCheat, findLaunchers, epicOwnedTitles, normalizeTitle, ownedEpicGames, ownedGalaxyGames };
+module.exports = { scanLibrary, customGame, customId, hasAntiCheat, findLaunchers, epicOwnedTitles, normalizeTitle, ownedEpicGames, ownedGalaxyGames };

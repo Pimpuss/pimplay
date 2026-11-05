@@ -90,6 +90,23 @@ async function autoMatch(...names) {
   return null;
 }
 
+const SOURCE_NAMES = { steam: 'Steam', nintendo: 'Nintendo eShop', gog: 'GOG', wikipedia: 'Wikipédia' };
+
+// Fiche hors Steam : choisie à la main (meta.ext) ou ancien repli Wikipédia automatique (meta.wiki)
+function extOf(meta) {
+  if (meta.ext) return meta.ext;
+  const w = meta.wiki;
+  if (!w) return null;
+  return {
+    source: 'wikipedia', id: null, name: null, cover: w.cover, header: w.header, hero: [], logo: null,
+    description: w.description, developers: w.developers, publishers: w.publishers,
+    releaseDate: w.releaseDate, genres: w.genres, platforms: [], url: w.wikiUrl,
+  };
+}
+
+// Champs posés par une association Steam (steamDetails), à effacer quand on choisit une autre source
+const STEAM_FIELDS = ['steamAppId', 'name', 'description', 'developers', 'publishers', 'releaseDate', 'genres', 'header', 'background'];
+
 // Applique les métadonnées au jeu détecté (nom, images, infos)
 function applyMeta(game, meta, coversDir) {
   if (!meta) return game;
@@ -113,23 +130,28 @@ function applyMeta(game, meta, coversDir) {
       genres: meta.genres,
     };
   }
-  // Repli Wikipédia / Wikidata (jeux absents de Steam) : seulement si aucune fiche Steam n'est associée
-  if (meta.wiki && !meta.steamAppId) {
-    const w = meta.wiki;
+  // Fiche d'une autre source (Nintendo, GOG, Wikipédia choisie à la main, ou repli Wikipédia
+  // automatique pour les jeux absents de Steam) : seulement si aucune fiche Steam n'est associée
+  const ext = !meta.steamAppId ? extOf(meta) : null;
+  if (ext) {
+    if (ext.name) g.name = ext.name;
     g.images = {
       ...g.images,
-      cover: [w.cover, ...own('cover')].filter(Boolean),
-      header: [w.header, w.cover, ...own('header')].filter(Boolean),
-      hero: [...own('hero'), w.header].filter(Boolean),
+      cover: [ext.cover, ...own('cover')].filter(Boolean),
+      header: [ext.header, ext.cover, ...own('header')].filter(Boolean),
+      hero: [...[].concat(ext.hero || []), ...own('hero'), ext.header].filter(Boolean),
+      logo: [ext.logo, ...own('logo')].filter(Boolean),
     };
     g.info = {
-      description: w.description,
-      developers: w.developers || [],
-      publishers: w.publishers || [],
-      releaseDate: w.releaseDate || '',
-      genres: w.genres || [],
-      sourceName: 'Wikipédia',
-      sourceUrl: w.wikiUrl,
+      description: ext.description,
+      developers: ext.developers || [],
+      publishers: ext.publishers || [],
+      releaseDate: ext.releaseDate || '',
+      genres: ext.genres || [],
+      platforms: ext.platforms || [],
+      sourceName: SOURCE_NAMES[ext.source] || ext.source,
+      sourceUrl: ext.url,
+      sourceLicense: ext.source === 'wikipedia' ? 'CC BY-SA' : null,
     };
   }
   const local = (file) => `pimplay-img://local/${encodeURIComponent(path.join(coversDir, file))}`;
@@ -139,6 +161,11 @@ function applyMeta(game, meta, coversDir) {
   g.meta = {
     steamAppId: meta.steamAppId || null,
     steamName: meta.name || null,
+    // Fiche associée, quelle que soit sa source (steam, nintendo, gog, wikipedia)
+    source: meta.steamAppId ? 'steam' : ext?.source || null,
+    linkId: meta.steamAppId || ext?.id || null,
+    linkName: meta.name || ext?.name || null,
+    auto: !meta.steamAppId && !meta.ext && !!meta.wiki,
     customName: meta.customName || null,
     customCover: !!meta.customCover,
     customHero: !!meta.customHero,
@@ -147,4 +174,4 @@ function applyMeta(game, meta, coversDir) {
   return g;
 }
 
-module.exports = { searchSteam, steamDetails, autoMatch, applyMeta, fetchSteamAssets, withAssets };
+module.exports = { searchSteam, steamDetails, autoMatch, applyMeta, fetchSteamAssets, withAssets, STEAM_FIELDS };

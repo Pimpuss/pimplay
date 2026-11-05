@@ -176,7 +176,7 @@ export default function Game({ id }) {
             </div>
             {modTools && game.info?.description && <p className="game-desc">{game.info.description}</p>}
             {modTools && game.info?.sourceUrl && (
-              <a className="source-link" href={game.info.sourceUrl} target="_blank" rel="noreferrer">Source : {game.info.sourceName} (CC BY-SA)</a>
+              <a className="source-link" href={game.info.sourceUrl} target="_blank" rel="noreferrer">Source : {game.info.sourceName}{game.info.sourceLicense && ` (${game.info.sourceLicense})`}</a>
             )}
             <div className="game-actions" ref={actionsRef}>
               {!game.running && (launchStage ? (
@@ -467,18 +467,19 @@ function AboutPanel({ game, onCustomize }) {
         {info.description ? <p>{info.description}</p> : (
           <p style={{ color: 'var(--muted)' }}>
             Pas de description pour ce jeu.
-            {game.source !== 'steam' && ' Associez-le à sa fiche Steam avec « Personnaliser » pour récupérer ses infos.'}
+            {game.source !== 'steam' && ' Associez-le à sa fiche (Steam, Nintendo, GOG ou Wikipédia) avec « Personnaliser » pour récupérer ses infos.'}
           </p>
         )}
         {info.sourceUrl && (
           <a className="source-link" href={info.sourceUrl} target="_blank" rel="noreferrer">
-            Source : {info.sourceName} (CC BY-SA)
+            Source : {info.sourceName}{info.sourceLicense && ` (${info.sourceLicense})`}
           </a>
         )}
         {info.genres?.length > 0 && <div className="genre-tags">{info.genres.map((g) => <span key={g} className="genre-tag">{g}</span>)}</div>}
         <div className="about-grid">
           {info.developers?.length > 0 && <div><span>Développeur</span>{info.developers.join(', ')}</div>}
           {info.publishers?.length > 0 && <div><span>Éditeur</span>{info.publishers.join(', ')}</div>}
+          {info.platforms?.length > 0 && <div><span>Plateforme</span>{info.platforms.join(', ')}</div>}
           {info.releaseDate && <div><span>Sortie</span>{info.releaseDate}</div>}
           <div><span>Temps de jeu</span>{formatPlaytime(game.playtime) || '—'}</div>
           <div><span>Dernière partie</span>{timeAgo(game.lastPlayed)}</div>

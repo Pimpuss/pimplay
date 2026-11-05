@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut, protocol, net, Tray, Menu, nativeImage } = require('electron');
 const { Store } = require('./store.cjs');
-const { scanLibrary, findLaunchers, epicOwnedTitles, normalizeTitle, ownedEpicGames, ownedGalaxyGames } = require('./games.cjs');
+const { scanLibrary, customGame, customId, findLaunchers, epicOwnedTitles, normalizeTitle, ownedEpicGames, ownedGalaxyGames } = require('./games.cjs');
 const { minimizeWindowsOf, closeWindowsOf, killProcesses } = require('./windows.cjs');
 const { wikiLookup } = require('./wiki.cjs');
 const { fetchFreeGames, STORE: EPIC_STORE } = require('./epic-free.cjs');
@@ -12,7 +12,8 @@ const { lifetimeStats } = require('./lifetime.cjs');
 const { setupUpdater, checkForUpdate, checkIfStale, installUpdate, updateState } = require('./updater.cjs');
 const { login: steamLogin, logout: steamLogout, fetchAccount } = require('./steam-account.cjs');
 const ACCOUNTS = { epic: require('./epic-account.cjs'), gog: require('./gog-account.cjs') };
-const { searchSteam, steamDetails, autoMatch, applyMeta, fetchSteamAssets, withAssets } = require('./meta.cjs');
+const { searchSteam, steamDetails, autoMatch, applyMeta, fetchSteamAssets, withAssets, STEAM_FIELDS } = require('./meta.cjs');
+const { searchSource, sourceDetails, isStale } = require('./sources.cjs');
 const { TrainerSession } = require('./engine/session.cjs');
 const { GameProcess, listProcesses, getProcessPath, toHex, TYPES } = require('./engine/process.cjs');
 const { Scanner } = require('./engine/scanner.cjs');
@@ -133,7 +134,7 @@ function refreshLibrary() {
       library = await scanLibrary(store.data.customGames);
       store.data.libraryCache = library;
       store.save();
-      ensureAutoMeta().then(ensureSteamAssets).then(ensureSteamInfo);
+      ensureAutoMeta().then(ensureExtFresh).then(ensureSteamAssets).then(ensureSteamInfo);
       return decorated();
     } finally {
       scanning = null;
@@ -149,7 +150,7 @@ async function ensureAutoMeta() {
   store.data.autoTried ||= [];
   store.data.wikiTried ||= [];
   // Une fiche « porteuse d'infos » = Steam ou Wikipédia (une simple image perso ne compte pas)
-  const hasInfo = (id) => !!(store.data.meta[id]?.steamAppId || store.data.meta[id]?.wiki);
+  const hasInfo = (id) => !!(store.data.meta[id]?.steamAppId || store.data.meta[id]?.ext || store.data.meta[id]?.wiki);
   const todo = library.filter((g) => g.source !== 'steam' && !hasInfo(g.id)
     && ![].concat(g.images?.cover || []).length
     && (!store.data.autoTried.includes(g.id) || !store.data.wikiTried.includes(g.id)));
@@ -172,6 +173,21 @@ async function ensureAutoMeta() {
     }
   }
   store.save();
+  send('library', decorated());
+}
+
+// Fiches Nintendo / Wikipédia associées avec une ancienne version de Pimplay (ex. sans les bannières
+// 16:9 des jeux Switch 2) : redemandées une fois, en gardant l'ancienne si la source est injoignable
+async function ensureExtFresh() {
+  const stale = Object.entries(store.data.meta).filter(([, m]) => isStale(m.ext));
+  if (!stale.length) return;
+  for (const [id, m] of stale) {
+    try {
+      setMeta(id, { ext: await sourceDetails(m.ext.source, m.ext.id) });
+    } catch {
+      break; // hors ligne : on réessaiera au prochain lancement
+    }
+  }
   send('library', decorated());
 }
 
@@ -535,29 +551,57 @@ function setupIpc() {
   handle('library:addCustom', async () => {
     const r = await dialog.showOpenDialog(win, {
       title: 'Ajouter un jeu',
-      filters: [{ name: 'Exécutable', extensions: ['exe'] }],
-      properties: ['openFile'],
+      filters: [{ name: 'Exécutable ou raccourci', extensions: ['exe', 'lnk'] }],
+      // Garde le .lnk choisi au lieu de sa cible, pour pouvoir lire ses arguments
+      properties: ['openFile', 'noResolveAliases'],
     });
     if (r.canceled || !r.filePaths[0]) return null;
-    const exe = r.filePaths[0];
-    if (!store.data.customGames.includes(exe)) store.data.customGames.push(exe);
+    const picked = r.filePaths[0];
+    let entry = picked;
+    if (path.extname(picked).toLowerCase() === '.lnk') {
+      // Raccourci (ex. créé par un émulateur) : la cible seule ne suffit pas, le jeu est dans les arguments
+      let link;
+      try { link = shell.readShortcutLink(picked); } catch { throw new Error('Raccourci illisible'); }
+      if (!link.target) throw new Error('Ce raccourci ne pointe vers aucun programme');
+      const args = (link.args || '').trim();
+      entry = { id: customId(link.target, args), exe: link.target, args, cwd: link.cwd || '', name: path.basename(picked, '.lnk') };
+    }
+    const added = customGame(entry);
+    if (!store.data.customGames.some((e) => customGame(e).id === added.id)) store.data.customGames.push(entry);
     store.save();
     await refreshLibrary();
-    // Tente de retrouver la fiche Steam à partir du dossier puis du nom de l'exécutable
-    const game = library.find((g) => g.exe === exe);
+    // Tente de retrouver la fiche Steam à partir du dossier puis du nom de l'exécutable (ou du raccourci)
+    const game = library.find((g) => g.id === added.id);
     let matched = null;
     if (game && !store.data.meta[game.id]) {
-      const info = await autoMatch(path.basename(path.dirname(exe)), path.basename(exe, path.extname(exe))).catch(() => null);
+      const hints = entry === picked ? [path.basename(path.dirname(picked)), added.name] : [added.name];
+      const info = await autoMatch(...hints).catch(() => null);
       if (info) { setMeta(game.id, info); matched = info.name; }
     }
     return { library: decorated(), id: game?.id ?? null, matched };
   });
+  // Arguments de lancement d'un jeu perso (ex. le jeu qu'un émulateur doit ouvrir). L'identifiant
+  // du jeu est figé dans l'entrée pour garder son temps de jeu et ses images quand on les modifie
+  handle('library:setArgs', async (id, args) => {
+    const i = store.data.customGames.findIndex((e) => customGame(e).id === id);
+    if (i < 0) throw new Error('Seuls les jeux ajoutés à la main ont des arguments de lancement');
+    const e = store.data.customGames[i];
+    const base = typeof e === 'string' ? { exe: e } : e;
+    store.data.customGames[i] = { ...base, id, args: String(args || '').trim() };
+    store.save();
+    return refreshLibrary();
+  });
 
-  handle('meta:search', (term) => searchSteam(term));
-  handle('meta:link', async (id, appid) => {
-    const info = await steamDetails(appid);
-    setMeta(id, info);
-    ensureSteamAssets();
+  // Recherche d'une fiche : Steam par défaut, ou Nintendo eShop, GOG, Wikipédia (toutes plateformes)
+  handle('meta:search', (term, source = 'steam') => (source === 'steam' ? searchSteam(term) : searchSource(source, term)));
+  handle('meta:link', async (id, linkId, source = 'steam') => {
+    if (source === 'steam') {
+      setMeta(id, { ...(await steamDetails(linkId)), ext: null, wiki: null });
+      ensureSteamAssets();
+    } else {
+      const ext = await sourceDetails(source, linkId);
+      setMeta(id, { ...Object.fromEntries(STEAM_FIELDS.map((k) => [k, null])), wiki: null, ext });
+    }
     return decorated();
   });
   handle('meta:unlink', (id) => {
@@ -601,8 +645,7 @@ function setupIpc() {
     return decorated();
   });
   handle('library:removeCustom', async (id) => {
-    const g = library.find((x) => x.id === id);
-    if (g?.exe) store.data.customGames = store.data.customGames.filter((e) => e !== g.exe);
+    store.data.customGames = store.data.customGames.filter((e) => customGame(e).id !== id);
     store.save();
     return refreshLibrary();
   });
@@ -694,8 +737,8 @@ function setupIpc() {
 
     // Attend la création du processus pour que ses erreurs (exe introuvable, droits) remontent à l'interface
     // au lieu de planter le processus principal
-    const detach = (exe, args, cwd) => new Promise((resolve, reject) => {
-      const child = spawn(exe, args, { cwd, detached: true, stdio: 'ignore' });
+    const detach = (exe, args, cwd, opts = {}) => new Promise((resolve, reject) => {
+      const child = spawn(exe, args, { cwd: cwd || undefined, detached: true, stdio: 'ignore', ...opts });
       child.once('spawn', () => { child.unref(); resolve(); });
       child.once('error', reject);
     });
@@ -714,7 +757,10 @@ function setupIpc() {
       } else if (g.launch.url) {
         await shell.openExternal(g.launch.url);
       } else {
-        await detach(g.launch.exe, [], g.launch.cwd).catch(async (err) => {
+        // Arguments transmis tels quels (même syntaxe qu'un raccourci Windows, guillemets compris).
+        // En mode verbatim, Node ne met plus de guillemets nulle part : on les remet autour de l'exe
+        const verbatim = g.launch.args ? { windowsVerbatimArguments: true, argv0: `"${g.launch.exe}"` } : {};
+        await detach(g.launch.exe, g.launch.args ? [g.launch.args] : [], g.launch.cwd, verbatim).catch(async (err) => {
           // EACCES : l'exe exige les droits administrateur (manifeste requireAdministrator).
           // spawn ne sait pas élever ; ShellExecute (openPath) affiche l'invite UAC
           if (err.code !== 'EACCES') throw err;

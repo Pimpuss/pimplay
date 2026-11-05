@@ -72,7 +72,31 @@ async function wikidataFacts(qid) {
 // Renvoie null si aucun article de jeu vidéo ne correspond ; lève une erreur si Wikipédia est injoignable
 async function wikiLookup(name) {
   const en = await findEnglishPage(name);
-  if (!en) return null;
+  return en ? fromEnglishPage(en) : null;
+}
+
+// Recherche manuelle (fenêtre Personnaliser) : articles de jeux vidéo, toutes plateformes confondues
+async function wikiSearch(term) {
+  const q = String(term || '').trim();
+  if (!q) return [];
+  const url = 'https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrlimit=15&prop=pageimages|description'
+    + `&piprop=thumbnail&pithumbsize=200&pilicense=any&format=json&formatversion=2&gsrsearch=${encodeURIComponent(`${q} video game`)}`;
+  const pages = (await getJson(url))?.query?.pages || [];
+  return pages
+    .filter((p) => IS_GAME.test(p.description || '') && !/series|franchise/i.test(p.description || ''))
+    .sort((a, b) => a.index - b.index)
+    .slice(0, 12)
+    .map((p) => ({ id: p.title, name: p.title, image: p.thumbnail?.source || null, detail: p.description }));
+}
+
+// Fiche complète d'un article choisi dans la recherche manuelle
+async function wikiPage(title) {
+  const en = await summary('en', title);
+  if (!en) throw new Error('Article Wikipédia introuvable.');
+  return { name: en.title, ...(await fromEnglishPage(en)) };
+}
+
+async function fromEnglishPage(en) {
   // Description en français via le lien interlangue de Wikidata, sinon l'anglais
   let fr = null;
   if (en.wikibase_item) {
@@ -93,4 +117,4 @@ async function wikiLookup(name) {
   };
 }
 
-module.exports = { wikiLookup };
+module.exports = { wikiLookup, wikiSearch, wikiPage };

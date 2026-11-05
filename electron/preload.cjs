@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('pimplay', {
     refresh: invoke('library:refresh'),
     addCustom: invoke('library:addCustom'),
     removeCustom: invoke('library:removeCustom'),
+    setArgs: invoke('library:setArgs'),
     favorite: invoke('library:favorite'),
     hide: invoke('library:hide'),
     owned: invoke('library:owned'),
