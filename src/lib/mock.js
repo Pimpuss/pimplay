@@ -72,7 +72,7 @@ export function installMock() {
       list: () => (location.search.includes('lent') ? new Promise((r) => setTimeout(() => r(structuredClone(library)), 4000)) : ok(library)),
       refresh: () => ok(library),
       addCustom: () => ok(null),
-      removeCustom: () => ok(library),
+      removeCustom: (id) => { const i = library.findIndex((g) => g.id === id); if (i >= 0) library.splice(i, 1); return ok(library); },
       setArgs: (id, args) => { const g = library.find((x) => x.id === id); if (g) g.launchArgs = args; return ok(library); },
       favorite: (id, on) => { library.find((g) => g.id === id).favorite = on; return ok(library); },
       hide: (id, on) => { library.find((g) => g.id === id).hidden = on; return ok(library); },

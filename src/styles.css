@@ -237,6 +237,9 @@ h2.section-row > span svg { width: 17px; height: 17px; color: var(--accent-light
 .card-hide svg { width: 16px; height: 16px; }
 .card:hover .card-hide, .card:focus-within .card-hide { opacity: 1; }
 .card-hide:hover { color: var(--text); }
+.card-remove { right: 46px; }
+.card-remove:hover, .card-remove.armed { color: var(--danger); }
+.card-remove.armed { opacity: 1; width: auto; padding: 0 10px; display: flex; gap: 6px; font-size: 12px; font-weight: 650; }
 .card .name { margin-top: 9px; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .meta { margin-top: 2px; font-size: 12px; color: var(--dim); display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; }
 .card.not-installed .cover :is(img, .cover-fallback) { filter: grayscale(0.55) brightness(0.72); transition: filter 0.2s; }

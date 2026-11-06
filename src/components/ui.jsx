@@ -49,6 +49,17 @@ export function Cover({ game, kind = 'cover', className = 'cover-img', style }) 
   );
 }
 
+// Action à confirmer d'un second clic : le premier « arme » le bouton, qui se désarme après quelques secondes
+export function useArmed(ms = 3000) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return undefined;
+    const t = setTimeout(() => setArmed(false), ms);
+    return () => clearTimeout(t);
+  }, [armed, ms]);
+  return [armed, setArmed];
+}
+
 // Cadrage vertical choisi dans « Personnaliser » (25 % par défaut : on garde surtout le haut de l'image)
 export const DEFAULT_HERO_POSITION = 25;
 export const heroStyle = (game) => ({ objectPosition: `center ${game.meta?.heroPosition ?? DEFAULT_HERO_POSITION}%` });

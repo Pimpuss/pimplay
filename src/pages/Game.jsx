@@ -4,7 +4,7 @@ import {
   ScanSearch, Settings2, ShieldAlert, SlidersHorizontal, Snowflake, Square, Star, Timer, Trash2, Upload, Wand2, X,
 } from 'lucide-react';
 import { useApp, SOURCES, formatSize, formatPlaytime, timeAgo } from '../lib/context.jsx';
-import { Cover, GameLogo, HotkeyInput, Modal, Toggle, formatHotkey, heroStyle } from '../components/ui.jsx';
+import { Cover, GameLogo, HotkeyInput, Modal, Toggle, formatHotkey, heroStyle, useArmed } from '../components/ui.jsx';
 import CheatEditor, { newCheat, CHEAT_VALUE_TYPES } from '../components/CheatEditor.jsx';
 import MetaModal from '../components/MetaModal.jsx';
 import { useSessions } from './Stats.jsx';
@@ -28,6 +28,7 @@ export default function Game({ id }) {
   const [customizing, setCustomizing] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [flash, setFlash] = useState(null);
+  const [removeArmed, setRemoveArmed] = useArmed();
 
   // En-tête qui se replie : la position de défilement pilote la parallaxe de la bannière (variable CSS,
   // sans re-rendu) et l'apparition de la barre compacte une fois la bannière passée.
@@ -105,7 +106,12 @@ export default function Game({ id }) {
     if (t) { setTrainer(t); setLibrary((lib) => lib.map((g) => (g.id === id ? { ...g, cheatCount: t.cheats.length } : g))); toast(`${t.cheats.length} mods importés`); }
   });
   const exportT = guard(async () => { if (await window.pimplay.trainer.export(id)) toast('Trainer exporté'); });
-  const removeCustom = guard(async () => { setLibrary(await window.pimplay.library.removeCustom(id)); navigate('library'); });
+  const removeCustom = guard(async () => {
+    if (!removeArmed) return setRemoveArmed(true);
+    setLibrary(await window.pimplay.library.removeCustom(id));
+    toast(`${game.name} retiré de Pimplay (le jeu reste sur le disque)`);
+    navigate('library');
+  });
 
   const upsert = async (cheat) => {
     const cheats = trainer.cheats.some((c) => c.id === cheat.id)
@@ -207,6 +213,14 @@ export default function Game({ id }) {
               <button className="btn icon" style={{ height: 52, width: 52 }} onClick={toggleHidden} title={game.hidden ? 'Réafficher ce jeu' : 'Masquer ce jeu'}>
                 {game.hidden ? <Eye /> : <EyeOff />}
               </button>
+              {game.source === 'custom' && (
+                <button
+                  className={`btn danger ${removeArmed ? '' : 'icon'}`} style={{ height: 52, minWidth: 52 }} onClick={removeCustom}
+                  title="Retirer ce jeu de Pimplay (le jeu reste sur le disque)"
+                >
+                  <Trash2 />{removeArmed && ' Retirer ?'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -301,7 +315,7 @@ export default function Game({ id }) {
                   <button className="btn sm" onClick={() => window.pimplay.game.openFolder(id)}><FolderOpen /> Dossier</button>
                   {modTools && <button className="btn sm" onClick={importT}><Download /> Importer</button>}
                   {modTools && <button className="btn sm" onClick={exportT} disabled={!trainer?.cheats.length}><Upload /> Exporter</button>}
-                  {game.source === 'custom' && <button className="btn sm danger" onClick={removeCustom}><Trash2 /> Retirer</button>}
+                  {game.source === 'custom' && <button className="btn sm danger" onClick={removeCustom}><Trash2 /> {removeArmed ? 'Confirmer ?' : 'Retirer'}</button>}
                 </div>
               </div>
             </section>

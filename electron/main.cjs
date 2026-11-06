@@ -5,7 +5,8 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut, protocol, net, Tray, Menu, nativeImage } = require('electron');
 const { Store } = require('./store.cjs');
 const { scanLibrary, customGame, customId, findLaunchers, epicOwnedTitles, normalizeTitle, ownedEpicGames, ownedGalaxyGames } = require('./games.cjs');
-const { minimizeWindowsOf, closeWindowsOf, killProcesses } = require('./windows.cjs');
+const { minimizeWindowsOf, hideWindowsOf, closeWindowsOf, killProcesses } = require('./windows.cjs');
+const { waitBattlenetReady } = require('./stores.cjs');
 const { wikiLookup } = require('./wiki.cjs');
 const { fetchFreeGames, STORE: EPIC_STORE } = require('./epic-free.cjs');
 const { lifetimeStats } = require('./lifetime.cjs');
@@ -378,12 +379,18 @@ function updateLaunch(procs, runningNow) {
 
 // Jeu lancé depuis Pimplay et détecté : on range les fenêtres (réglages « Lancement des jeux »)
 let minimizedFor = null; // jeu pour lequel Pimplay s'est réduit, à rétablir à sa fermeture
+let battlenetStartedHidden = false; // Battle.net démarré caché par Pimplay pour le lancement en cours
 function onGameStarted({ gameId, kind }) {
   const s = store.data.settings;
   const launcherProc = LAUNCHER_PROC[kind];
-  if (launcherProc && s.minimizeLauncher !== false) {
+  // Battle.net démarré caché par Pimplay : la commande de lancement affiche sa fenêtre, on le
+  // remet dans la zone de notification (caché) plutôt que réduit dans la barre des tâches
+  const hide = kind === 'battlenet' && battlenetStartedHidden;
+  battlenetStartedHidden = false;
+  if (launcherProc && (hide || s.minimizeLauncher !== false)) {
     // Steam / Epic ouvrent parfois leur fenêtre avec un peu de retard : on repasse ensuite
-    const tidy = () => minimizeWindowsOf(listProcesses().filter((p) => p.name.toLowerCase() === launcherProc).map((p) => p.pid));
+    const pids = () => listProcesses().filter((p) => p.name.toLowerCase() === launcherProc).map((p) => p.pid);
+    const tidy = () => (hide ? hideWindowsOf(pids()) : minimizeWindowsOf(pids()));
     tidy();
     setTimeout(tidy, 4000);
     setTimeout(tidy, 12000);
@@ -460,7 +467,9 @@ function pollProcesses() {
   const procs = listProcesses();
   const alive = new Set(procs.map((p) => p.pid));
   for (const pid of pathCache.keys()) if (!alive.has(pid)) pathCache.delete(pid);
-  const dirs = library.map((g) => ({ id: g.id, dir: path.normalize(g.installDir).toLowerCase().replace(/[\\/]+$/, '') + '\\' }));
+  // Dossier le plus précis d'abord : WoW Forever (…\World of Warcraft\_forever_) avant un jeu installé au-dessus
+  const dirs = library.map((g) => ({ id: g.id, dir: path.normalize(g.installDir).toLowerCase().replace(/[\\/]+$/, '') + '\\' }))
+    .sort((a, b) => b.dir.length - a.dir.length);
   const next = [];
   for (const p of procs) {
     if (p.pid <= 4) continue;
@@ -751,9 +760,26 @@ function setupIpc() {
       } else if (type === 'epic' && launchers.epicExe) {
         // Même commande que le lien com.epicgames.launcher:// : démarre le launcher si besoin
         await detach(launchers.epicExe, [g.launch.url]);
-      } else if (type === 'battlenet' && launchers.battlenetExe && g.launch.code) {
-        // Démarre Battle.net si besoin et lance directement le jeu
-        await detach(launchers.battlenetExe, [`--exec=launch ${g.launch.code}`]);
+      } else if (type === 'battlenet' && launchers.battlenetExe && (g.launch.uid || g.launch.code)) {
+        // Lance le jeu par Battle.net, connecté au compte (« launch WoWF » = WoW Forever). Sans code
+        // produit connu, « launch_uid » ne fait que sélectionner le jeu dans Battle.net
+        const exec = g.launch.code ? `--exec=launch ${g.launch.code}` : `--exec=launch_uid ${g.launch.uid}`;
+        if (launcherUp) {
+          await detach(launchers.battlenetExe, [exec]);
+        } else {
+          // Battle.net fermé : à froid, il ignore la commande (il sélectionne le jeu sans le lancer).
+          // On le démarre (caché avec --autostarted, son mode « démarrage de Windows »), on attend
+          // qu'il soit connecté, puis on envoie la commande à l'instance qui tourne
+          const silent = store.data.settings.silentLaunchers !== false;
+          const since = Date.now();
+          await detach(launchers.battlenetExe, silent ? ['--autostarted'] : []);
+          battlenetStartedHidden = silent;
+          waitBattlenetReady(since).then(async () => {
+            if (launching?.gameId !== id || launching.stage === 'running') return; // annulé ou déjà lancé
+            await new Promise((r) => setTimeout(r, 1500));
+            await detach(launchers.battlenetExe, [exec]).catch(() => {});
+          });
+        }
       } else if (g.launch.url) {
         await shell.openExternal(g.launch.url);
       } else {

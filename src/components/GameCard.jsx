@@ -1,6 +1,6 @@
-import { Download, Eye, EyeOff, Star, Wand2 } from 'lucide-react';
+import { Download, Eye, EyeOff, Star, Trash2, Wand2 } from 'lucide-react';
 import { useApp, SOURCES, formatPlaytime } from '../lib/context.jsx';
-import { Cover } from './ui.jsx';
+import { Cover, useArmed } from './ui.jsx';
 
 const INSTALL_TOAST = {
   steam: (name) => `Steam ouvre l'installation de ${name}`,
@@ -28,6 +28,15 @@ export default function GameCard({ game }) {
     toast(game.hidden ? `${game.name} est de nouveau visible` : 'Jeu masqué — retrouvez-le dans Mes jeux › Masqués');
   });
 
+  // Jeux ajoutés à la main : retirés de Pimplay au second clic (le jeu reste sur le disque)
+  const [removeArmed, setRemoveArmed] = useArmed();
+  const remove = guard(async (e) => {
+    e.stopPropagation();
+    if (!removeArmed) return setRemoveArmed(true);
+    setLibrary(await window.pimplay.library.removeCustom(game.id));
+    toast(`${game.name} retiré de Pimplay (le jeu reste sur le disque)`);
+  });
+
   return (
     <div
       className={`card ${notInstalled ? 'not-installed' : ''}`}
@@ -50,6 +59,14 @@ export default function GameCard({ game }) {
         {!notInstalled && (
           <button className="card-hide" onClick={toggleHidden} title={game.hidden ? 'Réafficher ce jeu' : 'Masquer ce jeu'}>
             {game.hidden ? <Eye /> : <EyeOff />}
+          </button>
+        )}
+        {game.source === 'custom' && (
+          <button
+            className={`card-hide card-remove ${removeArmed ? 'armed' : ''}`} onClick={remove}
+            title="Retirer ce jeu de Pimplay (le jeu reste sur le disque)"
+          >
+            <Trash2 />{removeArmed && <span>Retirer ?</span>}
           </button>
         )}
       </div>

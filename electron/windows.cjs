@@ -11,6 +11,7 @@ const ShowWindow = user32.func('int __stdcall ShowWindow(intptr_t hwnd, int cmd)
 const PostMessageW = user32.func('int __stdcall PostMessageW(intptr_t hwnd, uint32_t msg, uintptr_t wparam, intptr_t lparam)');
 
 const SW_SHOWMINNOACTIVE = 7; // réduit sans voler le focus au jeu
+const SW_HIDE = 0;
 const WM_CLOSE = 0x0010;
 
 // Fenêtres de premier niveau visibles et titrées (pas les fenêtres techniques cachées) des processus donnés
@@ -34,6 +35,14 @@ function minimizeWindowsOf(pids) {
   return list.length;
 }
 
+// Cache les fenêtres (comme une réduction dans la zone de notification) ; renvoie leur nombre.
+// Pour un launcher que Pimplay a lui-même démarré caché : on le remet dans l'état où il a démarré
+function hideWindowsOf(pids) {
+  const list = visibleWindowsOf(pids);
+  for (const h of list) ShowWindow(h, SW_HIDE);
+  return list.length;
+}
+
 // Demande la fermeture comme un clic sur la croix (le jeu peut sauvegarder / confirmer) ; renvoie le nombre de fenêtres
 function closeWindowsOf(pids) {
   const list = visibleWindowsOf(pids);
@@ -50,4 +59,4 @@ function killProcesses(pids) {
   return n;
 }
 
-module.exports = { minimizeWindowsOf, closeWindowsOf, killProcesses };
+module.exports = { minimizeWindowsOf, hideWindowsOf, closeWindowsOf, killProcesses };
